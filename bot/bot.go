@@ -1,19 +1,19 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/brnlee/DiscordGo_CC/discord"
 	"github.com/bwmarrin/discordgo"
 )
 
 func main() {
 
 	// Create a new Discord session using the provided bot token.
-	dg, err := discordgo.New("Bot " + token)
+	dg, err := discordgo.New("Bot " + discord.BotToken)
 	if err != nil {
 		fmt.Println("error creating Discord session,", err)
 		return
@@ -33,25 +33,13 @@ func main() {
 	fmt.Println("Bot is now running.  Press CTRL-C to exit.")
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
-	//<-sc
+	<-sc
 
-	input := bufio.NewScanner(os.Stdin)
-	for input.Scan() {
-		sentence := input.Text()
-		if sentence == "exit" {
-			break
-		} else if sentence == "ping" {
-			dg.ChannelMessageSend(channelID, "ping")
-		} else {
-			dg.ChannelMessageSend(channelID, "pong")
-		}
-		fmt.Println(sentence)
-	}
-
-	fmt.Println("Closing")
 	// Cleanly close down the Discord session.
-	dg.Close()
-	fmt.Println("Closed")
+	e := dg.Close()
+	if e != nil {
+		println("There was an error closing the Discord session connection.")
+	}
 }
 
 // This function will be called (due to AddHandler above) every time a new
@@ -65,11 +53,11 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 	// If the message is "ping" reply with "Pong!"
 	if m.Content == "ping" {
-		s.ChannelMessageSend(m.ChannelID, "Pong!")
+		discord.SendMessage(s, "Pong!")
 	}
 
 	// If the message is "pong" reply with "Ping!"
 	if m.Content == "pong" {
-		s.ChannelMessageSend(m.ChannelID, "Ping!")
+		discord.SendMessage(s, "Ping!")
 	}
 }
